@@ -1,17 +1,38 @@
-# Controle Xbox (modelo 1914) + ESP32 DevKit 30 pinos
+# Xbox Controller + ESP32 DevKit (30 pin)
 
-Status: **funcionando** (testado: botão A acende o LED no GPIO 2).
+Connects an Xbox Wireless Controller (model 1914, Xbox Series X|S) directly to an
+ESP32 DevKit over Bluetooth LE using [Bluepad32](https://github.com/ricardoquesada/bluepad32).
+
+Status: **working** (tested: pressing A turns on the onboard LED on GPIO 2).
 
 ## Setup
-- Controle Xbox Series X|S (modelo 1914) com firmware atualizado (Bluetooth LE) via app "Acessórios do Xbox".
-- Arduino IDE: URL adicional de placas
-  `https://raw.githubusercontent.com/ricardoquesada/esp32-arduino-lib-builder/master/bluepad32_files/package_esp32_bluepad32_index.json`
-- Instalar "esp32_bluepad32" e selecionar a placa **ESP32 Dev Module**.
-- Pareamento: ligar o controle (botão Xbox) e segurar o botão de pareamento (ao lado da USB-C) até piscar rápido.
-- Se não reconectar: descomentar `BP32.forgetBluetoothKeys();` e reenviar.
 
-## Próximos passos (ideias)
-- Carrinho com ponte H (L298N/TB6612): analógico esquerdo -> velocidade/direção (PWM, com zona morta).
-- Servos com `ESP32Servo` mapeando `axisRX()` para 0-180.
-- Gatilhos (`brake()`/`throttle()`, 0-1023) para aceleração gradual.
-- Evitar GPIOs 6-11 (flash) e cuidado com 0, 2 e 12 (boot).
+1. **Update the controller firmware** (needed for Bluetooth LE): install the
+   "Xbox Accessories" app from the Microsoft Store, connect the controller via USB
+   and update it.
+2. **Arduino IDE:** add this URL under *File > Preferences > Additional boards manager URLs*:
+   `https://raw.githubusercontent.com/ricardoquesada/esp32-arduino-lib-builder/master/bluepad32_files/package_esp32_bluepad32_index.json`
+3. Install **esp32_bluepad32** in the Boards Manager and select the board **ESP32 Dev Module**.
+4. Upload `esp32-xbox-controller.ino` and open the Serial Monitor at 115200 baud.
+
+## Pairing
+
+Turn on the controller (Xbox button), then hold the pairing button (next to the USB-C port)
+until the Xbox logo blinks fast. The controller rumbles when connected and the Serial Monitor
+prints "Controller connected". It reconnects automatically afterwards.
+
+The controller stores a single Bluetooth pairing: pairing it with the ESP32 removes the
+pairing with the PC (USB still works).
+
+## Troubleshooting
+
+- Make sure the controller firmware is up to date.
+- Uncomment `BP32.forgetBluetoothKeys();` in `setup()`, upload, and pair again.
+- Use a USB data cable and a good power source; Bluetooth draws a lot of current.
+
+## Next steps (ideas)
+
+- RC car with an H-bridge (L298N / TB6612): left stick -> speed/steering (PWM, with a dead zone).
+- Servos with `ESP32Servo`, mapping `axisRX()` to 0-180 degrees.
+- Triggers (`brake()` / `throttle()`, 0-1023) for gradual acceleration.
+- Avoid GPIOs 6-11 (flash) and be careful with 0, 2 and 12 (boot strapping pins).
