@@ -1,68 +1,153 @@
 #include <Bluepad32.h>
+#include <ESP32Servo.h>
 
-#define LED_PIN 2   // Onboard blue LED on the DevKit
+// ---------------------------------------------------------------------------
+// Pins (all safe GPIOs on the 30-pin ESP32 DevKit)
+// ---------------------------------------------------------------------------
+#define LED_PIN             2    // Onboard blue LED (connection indicator)
+#define PIN_SUSP_LEFT       13   // SG90  - left suspension  (left stick)
+#define PIN_SUSP_RIGHT      14   // SG90  - right suspension (right stick)
+#define PIN_STEERING        27   // MG996R - steering        (D-pad)
 
+// ---------------------------------------------------------------------------
+// Tuning - adjust these to your mechanics
+// ---------------------------------------------------------------------------
+// Steering (MG996R)
+const int STEER_CENTER      = 90;   // servo angle when driving straight
+const int STEER_RANGE       = 35;   // +/- degrees from center (increase carefully!)
+const int STEER_STEP        = 4;    // degrees per update toward the target (speed)
+const bool STEER_INVERT     = false;
+
+// Suspension (SG90)
+const int SUSP_CENTER       = 90;   // angle with stick at rest
+const int SUSP_RANGE        = 45;   // +/- degrees at full stick deflection
+const int SUSP_STEP         = 6;    // degrees per update toward the target (speed)
+const bool SUSP_LEFT_INVERT = false;
+const bool SUSP_RIGHT_INVERT = true; // mirrored servo: flip if it moves the wrong way
+
+const int STICK_DEADZONE    = 60;   // sticks: -511..512, ignore small drift
+
+// Pulse widths in microseconds
+const int SG90_MIN_US       = 500;
+const int SG90_MAX_US       = 2400;
+const int MG996R_MIN_US     = 500;
+const int MG996R_MAX_US     = 2500;
+
+// ---------------------------------------------------------------------------
+// State
+// ---------------------------------------------------------------------------
 ControllerPtr controllers[BP32_MAX_GAMEPADS];
 
-// Called when a controller connects
+Servo servoSuspLeft;
+Servo servoSuspRight;
+Servo servoSteering;
+
+int angleSuspLeft  = SUSP_CENTER;
+int angleSuspRight = SUSP_CENTER;
+int angleSteering  = STEER_CENTER;
+
+// Move 'current' toward 'target' by at most 'step' degrees
+int approach(int current, int target, int step) {
+  if (current < target) return min(current + step, target);
+  if (current > target) return max(current - step, target);
+  return current;
+}
+
+// Stick value (-511..512) -> servo target angle, with dead zone
+int stickToAngle(int value, int center, int range, bool invert) {
+  if (abs(value) < STICK_DEADZONE) return center;
+  // Push stick up (negative Y) -> positive movement
+  int offset = map(-value, -512, 512, -range, range);
+  if (invert) offset = -offset;
+  return constrain(center + offset, center - range, center + range);
+}
+
+void centerAllServos() {
+  angleSuspLeft  = SUSP_CENTER;
+  angleSuspRight = SUSP_CENTER;
+  angleSteering  = STEER_CENTER;
+  servoSuspLeft.write(angleSuspLeft);
+  servoSuspRight.write(angleSuspRight);
+  servoSteering.write(angleSteering);
+}
+
+// ---------------------------------------------------------------------------
+// Bluepad32 callbacks
+// ---------------------------------------------------------------------------
 void onConnected(ControllerPtr ctl) {
   for (int i = 0; i < BP32_MAX_GAMEPADS; i++) {
     if (controllers[i] == nullptr) {
       Serial.printf("Controller connected in slot %d: %s\n", i, ctl->getModelName().c_str());
       controllers[i] = ctl;
       ctl->playDualRumble(0, 300, 0x80, 0x80);  // rumble to confirm
+      digitalWrite(LED_PIN, HIGH);
       return;
     }
   }
   Serial.println("No free slot for the controller.");
 }
 
-// Called when a controller disconnects
 void onDisconnected(ControllerPtr ctl) {
   for (int i = 0; i < BP32_MAX_GAMEPADS; i++) {
     if (controllers[i] == ctl) {
       Serial.printf("Controller disconnected from slot %d\n", i);
       controllers[i] = nullptr;
+      digitalWrite(LED_PIN, LOW);
+      centerAllServos();  // fail-safe: return everything to center
       return;
     }
   }
 }
 
+// ---------------------------------------------------------------------------
+// Controller logic
+// ---------------------------------------------------------------------------
 void processGamepad(ControllerPtr ctl) {
-  // Sticks: -511 to 512 | Triggers: 0 to 1023
-  int lx = ctl->axisX();
-  int ly = ctl->axisY();
-  int rx = ctl->axisRX();
-  int ry = ctl->axisRY();
-  int lt = ctl->brake();     // left trigger (LT)
-  int rt = ctl->throttle();  // right trigger (RT)
-
-  // Button A turns on the onboard LED
-  digitalWrite(LED_PIN, ctl->a() ? HIGH : LOW);
-
-  // Button B rumbles the controller
-  if (ctl->b()) ctl->playDualRumble(0, 150, 0xC0, 0xC0);
-
-  // D-pad
+  // --- Steering: D-pad left/right ---
   uint8_t d = ctl->dpad();
-  if (d & DPAD_UP)    Serial.println("Up");
-  if (d & DPAD_DOWN)  Serial.println("Down");
-  if (d & DPAD_LEFT)  Serial.println("Left");
-  if (d & DPAD_RIGHT) Serial.println("Right");
+  int steerTarget = STEER_CENTER;
+  if (d & DPAD_LEFT)  steerTarget = STEER_CENTER - STEER_RANGE;
+  if (d & DPAD_RIGHT) steerTarget = STEER_CENTER + STEER_RANGE;
+  if (STEER_INVERT) steerTarget = 2 * STEER_CENTER - steerTarget;
+  angleSteering = approach(angleSteering, steerTarget, STEER_STEP);
+  servoSteering.write(angleSteering);
 
-  Serial.printf(
-    "A:%d B:%d X:%d Y:%d LB:%d RB:%d L3:%d R3:%d | "
-    "LX:%4d LY:%4d RX:%4d RY:%4d | LT:%4d RT:%4d | "
-    "View:%d Menu:%d Xbox:%d\n",
-    ctl->a(), ctl->b(), ctl->x(), ctl->y(),
-    ctl->l1(), ctl->r1(), ctl->thumbL(), ctl->thumbR(),
-    lx, ly, rx, ry, lt, rt,
-    ctl->miscSelect(), ctl->miscStart(), ctl->miscSystem());
+  // --- Suspension: left stick Y -> left servo, right stick Y -> right servo ---
+  int leftTarget  = stickToAngle(ctl->axisY(),  SUSP_CENTER, SUSP_RANGE, SUSP_LEFT_INVERT);
+  int rightTarget = stickToAngle(ctl->axisRY(), SUSP_CENTER, SUSP_RANGE, SUSP_RIGHT_INVERT);
+  angleSuspLeft  = approach(angleSuspLeft,  leftTarget,  SUSP_STEP);
+  angleSuspRight = approach(angleSuspRight, rightTarget, SUSP_STEP);
+  servoSuspLeft.write(angleSuspLeft);
+  servoSuspRight.write(angleSuspRight);
+
+  // --- Extras ---
+  // Button A: re-center everything
+  if (ctl->a()) centerAllServos();
+
+  // Debug output
+  Serial.printf("Steer:%3d | SuspL:%3d SuspR:%3d | LY:%4d RY:%4d\n",
+                angleSteering, angleSuspLeft, angleSuspRight,
+                ctl->axisY(), ctl->axisRY());
 }
 
+// ---------------------------------------------------------------------------
 void setup() {
   Serial.begin(115200);
   pinMode(LED_PIN, OUTPUT);
+
+  // ESP32Servo: reserve PWM timers and use standard 50 Hz servo signals
+  ESP32PWM::allocateTimer(0);
+  ESP32PWM::allocateTimer(1);
+  ESP32PWM::allocateTimer(2);
+  ESP32PWM::allocateTimer(3);
+
+  servoSuspLeft.setPeriodHertz(50);
+  servoSuspRight.setPeriodHertz(50);
+  servoSteering.setPeriodHertz(50);
+  servoSuspLeft.attach(PIN_SUSP_LEFT,   SG90_MIN_US,   SG90_MAX_US);
+  servoSuspRight.attach(PIN_SUSP_RIGHT, SG90_MIN_US,   SG90_MAX_US);
+  servoSteering.attach(PIN_STEERING,    MG996R_MIN_US, MG996R_MAX_US);
+  centerAllServos();
 
   Serial.printf("Bluepad32 firmware: %s\n", BP32.firmwareVersion());
   const uint8_t* mac = BP32.localBdAddress();
@@ -74,7 +159,7 @@ void setup() {
   // Uncomment to erase saved pairings (use if reconnecting fails)
   // BP32.forgetBluetoothKeys();
 
-  BP32.enableVirtualDevice(false);  // don't treat touchpad/mouse as an extra device
+  BP32.enableVirtualDevice(false);
 }
 
 void loop() {
