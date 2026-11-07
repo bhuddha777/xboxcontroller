@@ -4,7 +4,8 @@ Connects an Xbox Wireless Controller (model 1914, Xbox Series X|S) directly to a
 ESP32 DevKit over Bluetooth LE using [Bluepad32](https://github.com/ricardoquesada/bluepad32).
 
 Status: **base connection tested and working** (A button lit the onboard LED).
-The servo code (steering + suspension) is **new and untested on hardware**.
+Steering and suspension servos were tested (SG90 are mirrored, so the right one is inverted in code).
+The drive motor code (H-bridge) is **new and untested on hardware**.
 
 ## Controls
 
@@ -13,8 +14,11 @@ The servo code (steering + suspension) is **new and untested on hardware**.
 | D-pad left / right | Steering (MG996R), smooth movement, returns to center on release |
 | Left stick up / down | Left suspension (SG90) |
 | Right stick up / down | Right suspension (SG90) |
-| A button | Re-center all servos |
-| Controller disconnects | All servos return to center (fail-safe) |
+| Right trigger (RT) | Drive forward (analog: the harder you press, the faster) |
+| Left trigger (LT) | Drive in reverse (analog) |
+| B button | Active brake |
+| A button | Re-center the servos |
+| Controller disconnects | Servos return to center and the motor stops (fail-safe) |
 
 ## Wiring
 
@@ -23,6 +27,13 @@ The servo code (steering + suspension) is **new and untested on hardware**.
 | SG90 left suspension | GPIO 13 |
 | SG90 right suspension | GPIO 14 |
 | MG996R steering | GPIO 27 |
+| H-bridge ENA (speed, PWM) | GPIO 25 |
+| H-bridge IN1 | GPIO 26 |
+| H-bridge IN2 | GPIO 33 |
+
+H-bridge (L298N): motor on OUT1/OUT2, ENA/IN1/IN2 to the ESP32 pins above (remove the ENA jumper
+so the PWM pin controls speed). Motor battery on the 12V/+ terminal, and **its GND to the ESP32 GND**.
+If the car goes backwards when pressing RT, swap the motor wires or set `MOTOR_INVERT = true`.
 
 **Power - important:**
 - Do **not** power the servos from the ESP32 5V/VIN pin. The MG996R can draw ~2.5 A when stalled.
@@ -30,6 +41,11 @@ The servo code (steering + suspension) is **new and untested on hardware**.
 - Connect the **GND of the servo supply to the ESP32 GND** (common ground), or the signal will not work.
 - Add a 470-1000 uF capacitor across the servo supply near the servos to avoid brown-outs/resets.
 - The ESP32 is powered separately (USB or its own regulator).
+- Motors and servos make electrical noise. Ideally power the **drive motor from its own battery**,
+  separate from the servo supply, with all grounds joined together.
+- No capacitor yet: the MG996R can pull the ESP32 voltage down and drop the Bluetooth connection.
+  Powering the servos from a separate supply (not the ESP32 5V pin) is the fix; the capacitor is a
+  recommended addition. A 100 nF ceramic capacitor across the motor terminals also reduces noise.
 
 ## Tuning
 
@@ -65,5 +81,6 @@ pairing with the PC (USB still works).
 
 ## Next steps (ideas)
 
-- Drive motors with an H-bridge (L298N / TB6612), speed on the triggers (`throttle()` / `brake()`).
+- Add a second drive motor (differential/4x4) or a lights/horn output on spare buttons.
+- Add the supply capacitor and a battery voltage monitor (ADC) with a low-battery warning.
 - Avoid GPIOs 6-11 (flash) and be careful with 0, 2 and 12 (boot strapping pins).
