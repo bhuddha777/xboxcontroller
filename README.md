@@ -27,12 +27,13 @@ The drive motor code (H-bridge) is **new and untested on hardware**.
 | SG90 left suspension | GPIO 13 |
 | SG90 right suspension | GPIO 14 |
 | MG996R steering | GPIO 27 |
-| H-bridge ENA (speed, PWM) | GPIO 25 |
-| H-bridge IN1 | GPIO 26 |
-| H-bridge IN2 | GPIO 33 |
+| H-bridge IN1 (PWM) | GPIO 26 |
+| H-bridge IN2 (PWM) | GPIO 33 |
 
-H-bridge (L298N): motor on OUT1/OUT2, ENA/IN1/IN2 to the ESP32 pins above (remove the ENA jumper
-so the PWM pin controls speed). Motor battery on the 12V/+ terminal, and **its GND to the ESP32 GND**.
+H-bridge: red mini dual driver module (MX1508 type, 2-10 V, ~1.5 A per channel). It has **no enable
+pin**: speed is PWM directly on IN1/IN2. Use channel A: motor on the MOTOR-A pads, ESP32 GPIO 26 -> IN1,
+GPIO 33 -> IN2. Module `+` goes to the motor battery (**max 10 V**), `-` goes to the battery GND **and**
+the ESP32 GND. IN3/IN4 and MOTOR-B are unused.
 If the car goes backwards when pressing RT, swap the motor wires or set `MOTOR_INVERT = true`.
 
 **Power - important:**

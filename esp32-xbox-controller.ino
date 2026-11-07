@@ -9,8 +9,9 @@
 #define PIN_SUSP_RIGHT      14   // SG90  - right suspension (right stick)
 #define PIN_STEERING        27   // MG996R - steering        (D-pad)
 
-// H-bridge (L298N or similar): ENA = speed (PWM), IN1/IN2 = direction
-#define PIN_MOTOR_ENA       25
+// Mini H-bridge (MX1508, channel A): no enable pin, PWM goes directly on IN1/IN2
+//   forward: IN1 = PWM, IN2 = LOW   |   reverse: IN1 = LOW, IN2 = PWM
+//   stop: both LOW                  |   brake: both HIGH
 #define PIN_MOTOR_IN1       26
 #define PIN_MOTOR_IN2       33
 
@@ -60,7 +61,8 @@ int angleSuspLeft  = SUSP_CENTER;
 int angleSuspRight = SUSP_CENTER;
 int angleSteering  = STEER_CENTER;
 
-ESP32PWM motorPwm;
+ESP32PWM motorPwmIn1;
+ESP32PWM motorPwmIn2;
 int motorSpeed = 0;          // current signed speed: -255..255
 
 // Move 'current' toward 'target' by at most 'step' degrees
@@ -79,21 +81,20 @@ int stickToAngle(int value, int center, int range, bool invert) {
   return constrain(center + offset, center - range, center + range);
 }
 
-// Apply a signed speed (-255..255) to the H-bridge
+// Apply a signed speed (-255..255) to the H-bridge (PWM on IN1 or IN2)
 void setMotor(int speed) {
   speed = constrain(speed, -255, 255);
   if (MOTOR_INVERT) speed = -speed;
   if (speed > 0) {
-    digitalWrite(PIN_MOTOR_IN1, HIGH);
-    digitalWrite(PIN_MOTOR_IN2, LOW);
+    motorPwmIn1.write(speed);
+    motorPwmIn2.write(0);
   } else if (speed < 0) {
-    digitalWrite(PIN_MOTOR_IN1, LOW);
-    digitalWrite(PIN_MOTOR_IN2, HIGH);
+    motorPwmIn1.write(0);
+    motorPwmIn2.write(-speed);
   } else {
-    digitalWrite(PIN_MOTOR_IN1, LOW);
-    digitalWrite(PIN_MOTOR_IN2, LOW);
+    motorPwmIn1.write(0);
+    motorPwmIn2.write(0);
   }
-  motorPwm.write(abs(speed));
 }
 
 // Stop the motor immediately (coast)
@@ -105,9 +106,8 @@ void stopMotor() {
 // Active brake: both inputs high shorts the motor terminals
 void brakeMotor() {
   motorSpeed = 0;
-  digitalWrite(PIN_MOTOR_IN1, HIGH);
-  digitalWrite(PIN_MOTOR_IN2, HIGH);
-  motorPwm.write(255);
+  motorPwmIn1.write(255);
+  motorPwmIn2.write(255);
 }
 
 void centerAllServos() {
@@ -232,9 +232,8 @@ void setup() {
   centerAllServos();
 
   // H-bridge
-  pinMode(PIN_MOTOR_IN1, OUTPUT);
-  pinMode(PIN_MOTOR_IN2, OUTPUT);
-  motorPwm.attachPin(PIN_MOTOR_ENA, MOTOR_PWM_FREQ, 8);  // 8-bit duty: 0..255
+  motorPwmIn1.attachPin(PIN_MOTOR_IN1, MOTOR_PWM_FREQ, 8);  // 8-bit duty: 0..255
+  motorPwmIn2.attachPin(PIN_MOTOR_IN2, MOTOR_PWM_FREQ, 8);
   stopMotor();
 
   Serial.printf("Bluepad32 firmware: %s\n", BP32.firmwareVersion());
